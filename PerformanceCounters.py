@@ -1,82 +1,80 @@
 import psutil
-import time
 import csv
 from datetime import datetime
 
-# Имя файла для сохранения данных
-output_file = "performance_data.csv"
+# Function to collect performance data
+def collect_data():
+    # Get current timestamp
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-def write_header():
-    """Создает файл и записывает заголовки столбцов"""
-    with open(output_file, mode="w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file, delimiter=';')
-        writer.writerow([
-            "Timestamp",
-            "PID",
-            "Process Name",
-            "CPU Usage (%)",
-            "Memory Usage (MB)",
-            "Disk Read (MB)",
-            "Disk Write (MB)",
-        ])
+    # Initialize list for process data
+    process_data = []
 
-def initialize_cpu_percent():
-    """Инициализирует значения CPU для всех процессов"""
-    for proc in psutil.process_iter(['pid']):
+    # Collect data for all running processes
+    for proc in psutil.process_iter(attrs=['pid', 'name', 'cpu_percent', 'memory_info']):
         try:
-            proc.cpu_percent(interval=None)  # Инициализация CPU данных
+            proc_info = proc.info
+            process_data.append({
+                'timestamp': timestamp,
+                'process_name': proc_info['name'],
+                'pid': proc_info['pid'],
+                'cpu_percent': proc_info['cpu_percent'],
+                'memory_usage_mb': proc_info['memory_info'].rss / (1024 * 1024),  # Convert to MB
+            })
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 
-def log_performance_data():
-    """Собирает данные о процессах и записывает их в файл"""
-    with open(output_file, mode="a", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file, delimiter=';')
+    # Sort by CPU usage and get top 30 processes
+    top_processes = sorted(process_data, key=lambda x: x['cpu_percent'], reverse=True)[:30]
 
-        for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'io_counters']):
-            try:
-                pid = proc.info['pid']
-                name = proc.info['name']
-                cpu_usage = proc.cpu_percent(interval=0.1)  # Замер CPU с небольшим интервалом
-                memory_usage = proc.info['memory_info'].rss / (1024 * 1024)  # Преобразование в MB
-                io_counters = proc.info['io_counters']
-                disk_read = io_counters.read_bytes / (1024 * 1024) if io_counters else 0
-                disk_write = io_counters.write_bytes / (1024 * 1024) if io_counters else 0
+    # Collect overall system resource usage
+    system_data = {
+        'timestamp': timestamp,
+        'cpu_usage_percent': psutil.cpu_percent(interval=1),
+        'memory_usage_percent': psutil.virtual_memory().percent,
+        'disk_usage_percent': psutil.disk_usage('/').percent,
+        'network_sent_mb': psutil.net_io_counters().bytes_sent / (1024 * 1024),
+        'network_recv_mb': psutil.net_io_counters().bytes_recv / (1024 * 1024),
+    }
 
-                writer.writerow([
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    pid,
-                    name,
-                    cpu_usage,
-                    memory_usage,
-                    disk_read,
-                    disk_write
-                ])
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
+    return process_data, top_processes, system_data
 
-def get_top_processes():
-    """Возвращает топ-10 процессов по загрузке CPU"""
-    processes = []
-    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
-        try:
-            processes.append((proc.info['pid'], proc.info['name'], proc.cpu_percent(interval=0.1)))
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
+# Write collected data to CSV files
+def write_to_csv(process_data, top_processes, system_data):
+    # File paths
+    all_processes_file = 'all_processes.csv'
+    top_processes_file = 'top_processes.csv'
+    system_metrics_file = 'system_metrics.csv'
 
-    top_processes = sorted(processes, key=lambda x: x[2], reverse=True)[:10]
-    print("\nТоп-10 процессов по загрузке CPU:")
-    for pid, name, cpu in top_processes:
-        print(f"PID: {pid}, Name: {name}, CPU Usage: {cpu}%")
+    # Write all processes data
+    with open(all_processes_file, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=['timestamp', 'process_name', 'pid', 'cpu_percent', 'memory_usage_mb'], delimiter=';')
+        if file.tell() == 0:
+            writer.writeheader()
+        writer.writerows(process_data)
 
-if __name__ == "__main__":
-    write_header()
-    initialize_cpu_percent()  # Инициализация CPU данных
-    print("Сбор данных начался. Нажмите Ctrl+C для завершения.")
+    # Write top processes data
+    with open(top_processes_file, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=['timestamp', 'process_name', 'pid', 'cpu_percent', 'memory_usage_mb'], delimiter=';')
+        writer.writeheader()
+        writer.writerows(top_processes)
+
+    # Write system metrics data
+    with open(system_metrics_file, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=['timestamp', 'cpu_usage_percent', 'memory_usage_percent', 'disk_usage_percent', 'network_sent_mb', 'network_recv_mb'], delimiter=';')
+        if file.tell() == 0:
+            writer.writeheader()
+        writer.writerow(system_data)
+
+# Main execution loop
+def main():
     try:
         while True:
-            log_performance_data()
-            time.sleep(5)  # Интервал сбора данных (в секундах)
-            get_top_processes()
+            process_data, top_processes, system_data = collect_data()
+            write_to_csv(process_data, top_processes, system_data)
+            print(f"Data collected at {system_data['timestamp']}")
     except KeyboardInterrupt:
-        print("Сбор данных завершен.")
+        print("Monitoring stopped by user.")
+
+if __name__ == "__main__":
+    main()
