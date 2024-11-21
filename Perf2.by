@@ -1,80 +1,79 @@
 import psutil
-import csv
+import json
+import time
+import os
 from datetime import datetime
 
-# Function to collect performance data
-def collect_data():
-    # Get current timestamp
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+def save_to_json(data, filename="system_info.json"):
+    try:
+        # Если файл уже существует, читаем его содержимое
+        if os.path.exists(filename):
+            with open(filename, "r") as json_file:
+                existing_data = json.load(json_file)
+        else:
+            existing_data = []
 
-    # Initialize list for process data
-    process_data = []
+        # Добавляем новые данные
+        existing_data.append(data)
 
-    # Collect data for all running processes
-    for proc in psutil.process_iter(attrs=['pid', 'name', 'cpu_percent', 'memory_info']):
-        try:
-            proc_info = proc.info
-            process_data.append({
-                'timestamp': timestamp,
-                'process_name': proc_info['name'],
-                'pid': proc_info['pid'],
-                'cpu_percent': proc_info['cpu_percent'],
-                'memory_usage_mb': proc_info['memory_info'].rss / (1024 * 1024),  # Convert to MB
-            })
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
+        # Записываем обновленные данные в файл
+        with open(filename, "w") as json_file:
+            json.dump(existing_data, json_file, indent=4)
+            print(f"Данные успешно сохранены в {filename}")
+    except Exception as e:
+        print(f"Ошибка при сохранении данных в JSON: {e}")
 
-    # Sort by CPU usage and get top 30 processes
-    top_processes = sorted(process_data, key=lambda x: x['cpu_percent'], reverse=True)[:30]
 
-    # Collect overall system resource usage
-    system_data = {
-        'timestamp': timestamp,
-        'cpu_usage_percent': psutil.cpu_percent(interval=1),
-        'memory_usage_percent': psutil.virtual_memory().percent,
-        'disk_usage_percent': psutil.disk_usage('/').percent,
-        'network_sent_mb': psutil.net_io_counters().bytes_sent / (1024 * 1024),
-        'network_recv_mb': psutil.net_io_counters().bytes_recv / (1024 * 1024),
+def get_cpu_info():
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "physical_cores": psutil.cpu_count(logical=False),
+        "total_cores": psutil.cpu_count(logical=True),
+        "processor_speed": psutil.cpu_freq().current,
+        "cpu_usage_per_core": dict(enumerate(psutil.cpu_percent(percpu=True, interval=1))),
+        "total_cpu_usage": psutil.cpu_percent(interval=1)
     }
 
-    return process_data, top_processes, system_data
-
-# Write collected data to CSV files
-def write_to_csv(process_data, top_processes, system_data):
-    # File paths
-    all_processes_file = 'all_processes.csv'
-    top_processes_file = 'top_processes.csv'
-    system_metrics_file = 'system_metrics.csv'
-
-    # Write all processes data
-    with open(all_processes_file, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=['timestamp', 'process_name', 'pid', 'cpu_percent', 'memory_usage_mb'], delimiter=';')
-        if file.tell() == 0:
-            writer.writeheader()
-        writer.writerows(process_data)
-
-    # Write top processes data
-    with open(top_processes_file, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=['timestamp', 'process_name', 'pid', 'cpu_percent', 'memory_usage_mb'], delimiter=';')
-        writer.writeheader()
-        writer.writerows(top_processes)
-
-    # Write system metrics data
-    with open(system_metrics_file, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=['timestamp', 'cpu_usage_percent', 'memory_usage_percent', 'disk_usage_percent', 'network_sent_mb', 'network_recv_mb'], delimiter=';')
-        if file.tell() == 0:
-            writer.writeheader()
-        writer.writerow(system_data)
-
-# Main execution loop
-def main():
-    try:
-        while True:
-            process_data, top_processes, system_data = collect_data()
-            write_to_csv(process_data, top_processes, system_data)
-            print(f"Data collected at {system_data['timestamp']}")
-    except KeyboardInterrupt:
-        print("Monitoring stopped by user.")
+def get_memory_info():
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "total_memory": mem.total / (1024.0 ** 3),
+        "available_memory": mem.available / (1024.0 ** 3),
+        "used_memory": mem.used / (1024.0 ** 3),
+        "memory_percentage": mem.percent,
+        "total_swap": swap.total / (1024.0 ** 3),
+        "used_swap": swap.used / (1024.0 ** 3),
+        "free_swap": swap.free / (1024.0 ** 3),
+        "swap_percentage": swap.percent
+    }
+def get_disk_io_counters():
+    io_counters = psutil.disk_io_counters()
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "read_count": io_counters.read_count,
+        "write_count": io_counters.write_count,
+        "read_bytes": io_counters.read_bytes,
+        "write_bytes": io_counters.write_bytes,
+        "read_time": io_counters.read_time,
+        "write_time": io_counters.write_time
+    }
 
 if __name__ == "__main__":
-    main()
+    try:
+        print("="*40)
+        print("System Monitoring")
+        print("="*40)
+        print("Сбор данных начался. Нажмите Ctrl+C для завершения.")
+        
+        while True:
+            data = {
+                "cpu_info": get_cpu_info(),
+                "memory_info": get_memory_info(),
+                "disk_io_counters": get_disk_io_counters()
+            }
+            save_to_json(data)
+            time.sleep(60)  # Интервал в одну минуту
+    except KeyboardInterrupt:
+        print("\nМониторинг завершён.")

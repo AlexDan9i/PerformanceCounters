@@ -1,0 +1,79 @@
+import psutil
+import json
+import time
+import os
+from datetime import datetime
+
+def save_to_json(data, filename="system_info.json"):
+    try:
+        # Если файл уже существует, читаем его содержимое
+        if os.path.exists(filename):
+            with open(filename, "r") as json_file:
+                existing_data = json.load(json_file)
+        else:
+            existing_data = []
+
+        # Добавляем новые данные
+        existing_data.append(data)
+
+        # Записываем обновленные данные в файл
+        with open(filename, "w") as json_file:
+            json.dump(existing_data, json_file, indent=4)
+            print(f"Данные успешно сохранены в {filename}")
+    except Exception as e:
+        print(f"Ошибка при сохранении данных в JSON: {e}")
+
+
+def get_cpu_info():
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "physical_cores": psutil.cpu_count(logical=False),
+        "total_cores": psutil.cpu_count(logical=True),
+        "processor_speed": psutil.cpu_freq().current,
+        "cpu_usage_per_core": dict(enumerate(psutil.cpu_percent(percpu=True, interval=1))),
+        "total_cpu_usage": psutil.cpu_percent(interval=1)
+    }
+
+def get_memory_info():
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "total_memory": mem.total / (1024.0 ** 3),
+        "available_memory": mem.available / (1024.0 ** 3),
+        "used_memory": mem.used / (1024.0 ** 3),
+        "memory_percentage": mem.percent,
+        "total_swap": swap.total / (1024.0 ** 3),
+        "used_swap": swap.used / (1024.0 ** 3),
+        "free_swap": swap.free / (1024.0 ** 3),
+        "swap_percentage": swap.percent
+    }
+def get_disk_io_counters():
+    io_counters = psutil.disk_io_counters()
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "read_count": io_counters.read_count,
+        "write_count": io_counters.write_count,
+        "read_bytes": io_counters.read_bytes,
+        "write_bytes": io_counters.write_bytes,
+        "read_time": io_counters.read_time,
+        "write_time": io_counters.write_time
+    }
+
+if __name__ == "__main__":
+    try:
+        print("="*40)
+        print("System Monitoring")
+        print("="*40)
+        print("Сбор данных начался. Нажмите Ctrl+C для завершения.")
+        
+        while True:
+            data = {
+                "cpu_info": get_cpu_info(),
+                "memory_info": get_memory_info(),
+                "disk_io_counters": get_disk_io_counters()
+            }
+            save_to_json(data)
+            time.sleep(60)  # Интервал в одну минуту
+    except KeyboardInterrupt:
+        print("\nМониторинг завершён.")
